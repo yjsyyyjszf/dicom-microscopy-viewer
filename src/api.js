@@ -607,9 +607,223 @@ class VLWholeSlideMicroscopyImageViewer {
       item.style.margin = '1px';
       item.style.willChange = 'contents,width';
     }
-
   }
 
+  /*
+   * options:
+   *    - geometryType (string)
+   *    - onDrawStartHandler (on-event handler function)
+   *    - onDrawEndHandler (on-event handler function)
+   *
+   * ---
+   * Draw Event (http://openlayers.org/en/latest/apidoc/module-ol_interaction_Draw-DrawEvent.html)
+   * Properties:
+   *   - "feature" (http://openlayers.org/en/latest/apidoc/module-ol_features-Feature.html)
+   */
+  activateDrawInteraction(options) {
+    this.deactivateDrawInteraction();
+    // TODO: "type", "condition", etc.
+    const customOptionsMapping = {
+      point: {
+        type: 'Point',
+      },
+      line: {
+        type: 'LineString',
+      },
+      freehandLine: {
+        type: 'LineString',
+        freehand: true,
+      },
+      circle: {
+        type: 'Circle',
+      },
+      box: {
+        type: 'Circle',
+        geometryFunction: createRegularPolygon(4),
+      },
+      polygon: {
+        type: 'Polygon',
+      },
+      freehandPolygon: {
+        type: 'Polygon',
+        freehand: true,
+      }
+    };
+    // TODO: ellipse
+    //     // https://gis.stackexchange.com/questions/49223/drawing-ellipse-with-openlayers#49228
+    const defaultOptions = {
+      source: this[_drawingSource],
+      features: this[_features],
+    };
+    if (!('geometryType' in options)) {
+      console.error('geometry type must be specified for drawing interaction')
+    }
+    if (!(options.geometryType in customOptionsMapping)) {
+      console.error(`unsupported geometry type "${options.geometryType}"`)
+    }
+    const customOptions = customOptionsMapping[options.geometryType];
+    const allOptions = Object.assign(defaultOptions, customOptions);
+    this[_interactions].draw = new Draw(allOptions);
+
+    if (typeof options.onDrawStartHandler === 'function') {
+      this[_interactions].draw.on('drawstart', options.onDrawStartHandler);
+    }
+    if (typeof options.onDrawEndHandler === 'function') {
+      this[_interactions].draw.on('drawend', options.onDrawEndHandler);
+    }
+
+    this[_map].addInteraction(this[_interactions].draw);
+  }
+
+  deactivateDrawInteraction() {
+    if (this[_interactions].draw !== undefined) {
+      this[_map].removeInteraction(this[_interactions].draw);
+    }
+  }
+
+  /*
+   * options:
+   *   - onSelectedHandler (on-event handler function)
+   *   - onDeselectedHandler (on-event handler function)
+   *
+   * ---
+   * Select Event (http://openlayers.org/en/latest/apidoc/module-ol_interaction_Select-SelectEvent.html)
+   * Properties:
+   *   - "selected", "deselected" (http://openlayers.org/en/latest/apidoc/module-ol_features-Feature.html)
+   *   - "mapBrowserEvent" (http://openlayers.org/en/latest/apidoc/module-ol_MapBrowserEvent-MapBrowserEvent.html)
+   */
+  activateSelectInteraction(options) {
+    this.deactivateSelectInteraction();
+    // TODO: "condition", etc.
+    this[_interactions].select = new Select({
+      layers: [this[_drawingLayer]]
+    });
+
+    if (typeof options.onSelectedHandler === 'function') {
+      this[_interactions].select.on('selected', options.onSelectedHandler);
+    }
+    if (typeof options.onDeselectedHandler === 'function') {
+      this[_interactions].select.on('deselected', options.onDeselectedHandler);
+    }
+
+    this[_map].addInteraction(this[_interactions].select);
+  }
+
+  deactivateSelectInteraction() {
+    if (this[_interactions].select) {
+      this[_map].removeInteraction(this[_interactions].select);
+    }
+  }
+
+  /*
+   * options:
+   *   - onModifyStartHandler (on-event handler function)
+   *   - onModifyEndHandler (on-event handler function)
+   *
+   * ---
+   * Modify Event (http://openlayers.org/en/latest/apidoc/module-ol_interaction_Modify-ModifyEvent.html)
+   * Properties:
+   *   - "features" (http://openlayers.org/en/latest/apidoc/module-ol_features-Feature.html)
+   *   - "mapBrowserEvent" (http://openlayers.org/en/latest/apidoc/module-ol_MapBrowserEvent-MapBrowserEvent.html)
+   */
+  activateModifyInteraction(options) {
+    this.deactivateModiifyInteraction();
+    this[_interactions].modify = new Modify({
+      features: this[_features],  // TODO: or source, i.e. "drawings"???
+    });
+    if (typeof options.onModifyStartHandler === 'function') {
+      this[_interactions].modify.on('modifystart', options.onModifyStartHandler);
+    }
+    if (typeof options.onModifyEndHandler === 'function') {
+      this[_interactions].modify.on('modifyend', options.onModifyEndHandler);
+    }
+    this[_map].addInteraction(this[_interactions].modify);
+  }
+
+  deactivateModifyInteraction() {
+    if (this[_interactions].modify) {
+      this[_map].removeInteraction(this[_interactions].modify);
+    }
+  }
+
+  getAllScoords() {
+    const features = this[_features].getArray();
+    const graphics = [];
+    for (let i = 0; i < features.length; i++) {
+      const geometry = features[i].getGeometry()
+      const graphic = _geometry2Scoord(geometry);
+      graphics.push(graphic);
+    }
+    return graphics;
+  }
+
+  countScoords() {
+    return this[_features].getLength();
+  }
+
+  getScoord(index) {
+    const feature = this[_features].item(index);
+    const geometry = feature.getGeometry();
+    return _geometry2Scoord(geometry);
+  }
+
+  addScoord(item) {
+    let geometry = _scoord2Geometry(item);
+    let feature = new Feature({geometry});
+    this[_drawingSource].addFeature(feature);
+  }
+
+  updateScoord(index, item) {
+    let geometry = _scoord2Geometry(item);
+    let feature = new Feature({geometry});
+    this[_features].setAt(index, feature);
+  }
+
+  removeScoord(index) {
+    let feature = this[_features].getAt(index);
+    this[_features].removeAt(index);
+    this[_drawingSource].removeFeature(feature);
+  }
+
+  set onAddScoordHandler(func) {
+    this[_features].on('add', func);
+  }
+
+  set onRemoveScoordHandler(func) {
+    this[_features].on('remove', func);
+  }
+
+  set onAddFeatureHandler(func) {
+    this[_drawingSource].on('addfeature', func);
+  }
+
+  set onRemoveFeatureHandler(func) {
+    this[_drawingSource].on('removefeature', func);
+  }
+
+  set onChangeFeatureHandler(func) {
+    this[_drawingSource].on('changefeature', func);
+  }
+
+  set onClearFeaturesHandler(func) {
+    this[_drawingSource].on('clearfeature', func);
+  }
+
+  set onClickHandler(func) {
+    this[_map].on('click', func);
+  }
+
+  set onSingleClickHandler(func) {
+    this[_map].on('singleclick', func);
+  }
+
+  set onDoubleClickHandler(func) {
+    this[_map].on('dblclick', func);
+  }
+
+  set onDragHandler(func) {
+    this[_map].on('pointerdrag', func);
+  }
 }
 
 export { VLWholeSlideMicroscopyImageViewer };
