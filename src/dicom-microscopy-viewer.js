@@ -1,25 +1,13 @@
-import { VLWholeSlideMicroscopyImageViewer } from './api.js';
-import { ROI } from './roi.js';
-import {
-  Point,
-  Multipoint,
-  Polyline,
-  Circle,
-  Ellipse,
-} from './scoord.js';
+import { Point, Multipoint, Polyline, Circle, Ellipse } from "./scoord.js";
 
-let api = {
-  VLWholeSlideMicroscopyImageViewer,
-};
-let scoord = {
+const scoord = {
   Point,
   Multipoint,
   Polyline,
   Circle,
   Ellipse
 };
-let roi = {
-  ROI,
-}
 
-export { api, scoord, roi };
+export * from "./api.js";
+export * from "./roi.js";
+export { scoord };
