@@ -16,4 +16,6 @@ const DICOMMicroscopyViewer = {
   scoord
 };
 
+export { VLWholeSlideMicroscopyImageViewer, ROI, scoord };
+
 export default DICOMMicroscopyViewer;

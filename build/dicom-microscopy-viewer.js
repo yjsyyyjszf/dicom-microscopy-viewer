@@ -1,8 +1,8 @@
 (function (global, factory) {
-  typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
-  typeof define === 'function' && define.amd ? define(factory) :
-  (global.DICOMMicroscopyViewer = factory());
-}(this, (function () { 'use strict';
+  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
+  typeof define === 'function' && define.amd ? define(['exports'], factory) :
+  (factory((global.DICOMMicroscopyViewer = {})));
+}(this, (function (exports) { 'use strict';
 
   /**
    * @module ol/util
@@ -51522,6 +51522,11 @@
     scoord
   };
 
-  return DICOMMicroscopyViewer;
+  exports.VLWholeSlideMicroscopyImageViewer = VLWholeSlideMicroscopyImageViewer;
+  exports.ROI = ROI;
+  exports.scoord = scoord;
+  exports.default = DICOMMicroscopyViewer;
+
+  Object.defineProperty(exports, '__esModule', { value: true });
 
 })));
