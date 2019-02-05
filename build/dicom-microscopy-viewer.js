@@ -1,8 +1,8 @@
 (function (global, factory) {
-  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
-  typeof define === 'function' && define.amd ? define(['exports'], factory) :
-  (factory((global.DICOMMicroscopyViewer = {})));
-}(this, (function (exports) { 'use strict';
+  typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
+  typeof define === 'function' && define.amd ? define(factory) :
+  (global.DICOMMicroscopyViewer = factory());
+}(this, (function () { 'use strict';
 
   /**
    * @module ol/util
@@ -51018,7 +51018,6 @@
       tileSizes.reverse();
       origins.reverse();
 
-      // We can't call "this" inside functions.
       const pyramid = this.pyramid;
 
       /*
@@ -51288,12 +51287,7 @@
 
     }
 
-    /* Renders the map.
-     * @param{Object} options options object
-     *
-     * options:
-     *   - container - name of an HTML element for the map
-     *   - controlContainers - names of HTML elements that should be used for given controls
+    /* Renders the images.
      */
     render(options) {
       if (!('container' in options)) {
@@ -51407,7 +51401,6 @@
      */
     activateSelectInteraction(options={}) {
       this.deactivateSelectInteraction();
-      // TODO: "condition", etc.
       this[_interactions].select = new Select({
         layers: [this[_drawingLayer]]
       });
@@ -51429,7 +51422,6 @@
     }
 
     /* Activate modify interaction.
-     * @param{Object} options options object
      */
     activateModifyInteraction(options={}) {
       this.deactivateModifyInteraction();
@@ -51514,54 +51506,22 @@
       this[_drawingLayer].getVisible();
     }
 
-    // set onAddROIHandler(callback) {
-    //   if (typeof callback !== 'function') {
-    //     console.error('callback must be a function')
-    //   }
-    //   this[_drawingSource].on('addfeature', callback);
-    // }
-
-    // set onRemoveROIHandler(callback) {
-    //   if (typeof callback !== 'function') {
-    //     console.error('callback must be a function')
-    //   }
-    //   this[_drawingSource].on('removefeature', callback);
-    // }
-
-    // set onUpdateROIHandler(callback) {
-    //   if (typeof callback !== 'function') {
-    //     console.error('callback must be a function')
-    //   }
-    //   this[_drawingSource].on('changefeature', callback);
-    // }
-
-    // set onUpdateROIPropertiesHandler(callback) {
-    //   if (typeof callback !== 'function') {
-    //     console.error('callback must be a function')
-    //   }
-    //   this[_drawingSource].on('propertychange', callback);
-    // }
-
   }
 
-  let api = {
-    VLWholeSlideMicroscopyImageViewer,
-  };
-  let scoord = {
+  const scoord = {
     Point: Point$1,
     Multipoint,
     Polyline,
     Circle: Circle$1,
     Ellipse
   };
-  let roi = {
+
+  const DICOMMicroscopyViewer = {
+    VLWholeSlideMicroscopyImageViewer,
     ROI,
+    scoord
   };
 
-  exports.api = api;
-  exports.scoord = scoord;
-  exports.roi = roi;
-
-  Object.defineProperty(exports, '__esModule', { value: true });
+  return DICOMMicroscopyViewer;
 
 })));
