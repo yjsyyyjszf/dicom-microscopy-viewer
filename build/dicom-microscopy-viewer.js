@@ -4,6 +4,150 @@
   (factory((global.DICOMMicroscopyViewer = {})));
 }(this, (function (exports) { 'use strict';
 
+  /*
+   * Spatial coordinates of a geometric region of interest (ROI) in the DICOM
+   * image coordinate system.
+   */
+  class Scoord {
+
+    constructor() {}
+
+    get graphicData() {
+      throw new Error('Propotype property "graphicData" must be implemented.');
+    }
+
+    get graphicType() {
+      throw new Error('Propotype property "graphicType" must be implemented.');
+    }
+
+    get pixelOriginInterpretation() {
+      // FRAME or VOLUME
+      /* TODO: Consider relative to frame instead of total pixel matrix.
+       * This would complicate scenarios where graphics span multiple frames.
+       */
+      return 'VOLUME';
+    }
+
+    // get fiducialUID() {
+    // }
+
+  }
+
+
+  class Point extends Scoord {
+
+    constructor(coordinates) {
+      super();
+      this.coordinates = coordinates;
+    }
+
+    get graphicData() {
+      return this.coordinates;
+    }
+
+    get graphicType() {
+      return 'POINT';
+    }
+
+  }
+
+
+  class Multipoint extends Scoord {
+
+    constructor(coordinates) {
+      super();
+      this.coordinates = coordinates;
+    }
+
+    get graphicData() {
+      return this.coordinates;
+    }
+
+    get graphicType() {
+      return 'MULTIPOINT';
+    }
+
+  }
+
+
+  class Polyline extends Scoord {
+
+    constructor(coordinates) {
+      super();
+      this.coordinates = coordinates;
+    }
+
+    get graphicData() {
+      /*
+       * A polyline is defined as a series of connected line segments
+       * with ordered vertices denoted by (column,row) pairs.
+       * If the first and last vertices are the same it is a closed polygon.
+       */
+      // TODO: sort coordinates, considering Polygons, where first entry must
+      // equal last entry
+      return this.coordinates;
+    }
+
+    get graphicType() {
+      return 'POLYLINE';
+    }
+
+  }
+
+
+  class Circle extends Scoord {
+
+    constructor(centerCoordinates, radius) {
+      super();
+      this.centerCoordinates = centerCoordinates;
+      this.radius = radius;
+    }
+
+    get graphicData() {
+      /*
+       * A circle defined by two (column,row) pairs.
+       * The first point is the central pixel.
+       * The second point is a pixel on the perimeter of the circle.
+       */
+      return [
+        this.centerCoordinates,
+        [this.centerCoordinates[0], this.centerCoordinates[1] + this.radius]];
+    }
+
+    get graphicType() {
+      return 'CIRCLE';
+    }
+
+  }
+
+
+  class Ellipse extends Scoord {
+
+    constructor(majorAxisEndpointCoordinates, minorAxisEndpointCoordinates) {
+      super();
+      this.majorAxisEndpointCoordinates = majorAxisEndpointCoordinates;
+      this.minorAxisEndpointCoordinates = minorAxisEndpointCoordinates;
+    }
+
+    get graphicData() {
+      /*
+       * An ellipse defined by four pixel (column,row) pairs.
+       * The first two points specify the endpoints of the major axis.
+       * The second two points specify the endpoints of the minor axis.
+       */
+      return [
+        ...this.majorAxisEndpointCoordinates,
+        ...this.minorAxisEndpointCoordinates
+      ];
+    }
+
+
+    get graphicType() {
+      return 'ELLIPSE';
+    }
+
+  }
+
   /**
    * @module ol/util
    */
@@ -8788,7 +8932,7 @@
    *
    * @api
    */
-  var Point = /*@__PURE__*/(function (SimpleGeometry$$1) {
+  var Point$1 = /*@__PURE__*/(function (SimpleGeometry$$1) {
     function Point(coordinates, opt_layout) {
       SimpleGeometry$$1.call(this);
       this.setCoordinates(coordinates, opt_layout);
@@ -9602,7 +9746,7 @@
      * @api
      */
     Polygon.prototype.getInteriorPoint = function getInteriorPoint () {
-      return new Point(this.getFlatInteriorPoint(), GeometryLayout.XYM);
+      return new Point$1(this.getFlatInteriorPoint(), GeometryLayout.XYM);
     };
 
     /**
@@ -18084,7 +18228,7 @@
    *
    * @api
    */
-  var Circle = /*@__PURE__*/(function (SimpleGeometry$$1) {
+  var Circle$1 = /*@__PURE__*/(function (SimpleGeometry$$1) {
     function Circle(center, opt_radius, opt_layout) {
       SimpleGeometry$$1.call(this);
       if (opt_layout !== undefined && opt_radius === undefined) {
@@ -18307,7 +18451,7 @@
    * @function
    * @api
    */
-  Circle.prototype.transform;
+  Circle$1.prototype.transform;
 
   /**
    * @module ol/geom/flat/interpolate
@@ -19092,7 +19236,7 @@
       if (index < 0 || n <= index) {
         return null;
       }
-      return new Point(this.flatCoordinates.slice(
+      return new Point$1(this.flatCoordinates.slice(
         index * this.stride, (index + 1) * this.stride), this.layout);
     };
 
@@ -19108,7 +19252,7 @@
       /** @type {Array<Point>} */
       var points = [];
       for (var i = 0, ii = flatCoordinates.length; i < ii; i += stride) {
-        var point = new Point(flatCoordinates.slice(i, i + stride), layout);
+        var point = new Point$1(flatCoordinates.slice(i, i + stride), layout);
         points.push(point);
       }
       return points;
@@ -25022,7 +25166,7 @@
            */
           geometryFunction = function(coordinates, opt_geometry) {
             var circle = opt_geometry ? /** @type {Circle} */ (opt_geometry) :
-              new Circle([NaN, NaN]);
+              new Circle$1([NaN, NaN]);
             var squaredLength = squaredDistance$1(
               coordinates[0], coordinates[1]);
             circle.setCenterAndRadius(coordinates[0], Math.sqrt(squaredLength));
@@ -25032,7 +25176,7 @@
           var Constructor;
           var mode = this.mode_;
           if (mode === Mode$1.POINT) {
-            Constructor = Point;
+            Constructor = Point$1;
           } else if (mode === Mode$1.LINE_STRING) {
             Constructor = LineString;
           } else if (mode === Mode$1.POLYGON) {
@@ -25389,7 +25533,7 @@
     Draw.prototype.createOrUpdateSketchPoint_ = function createOrUpdateSketchPoint_ (event) {
       var coordinates = event.coordinate.slice();
       if (!this.sketchPoint_) {
-        this.sketchPoint_ = new Feature(new Point(coordinates));
+        this.sketchPoint_ = new Feature(new Point$1(coordinates));
         this.updateSketchFeatures_();
       } else {
         var sketchPointGeom = /** @type {Point} */ (this.sketchPoint_.getGeometry());
@@ -25705,7 +25849,7 @@
       var radius = Math.sqrt(
         squaredDistance$1(center, end));
       var geometry = opt_geometry ? /** @type {Polygon} */ (opt_geometry) :
-        fromCircle(new Circle(center), opt_sides);
+        fromCircle(new Circle$1(center), opt_sides);
       var angle = opt_angle;
       if (!opt_angle) {
         var x = end[0] - center[0];
@@ -25996,7 +26140,7 @@
     ExtentInteraction.prototype.createOrUpdatePointerFeature_ = function createOrUpdatePointerFeature_ (vertex) {
       var vertexFeature = this.vertexFeature_;
       if (!vertexFeature) {
-        vertexFeature = new Feature(new Point(vertex));
+        vertexFeature = new Feature(new Point$1(vertex));
         this.vertexFeature_ = vertexFeature;
         /** @type {VectorSource} */ (this.vertexOverlay_.getSource()).addFeature(vertexFeature);
       } else {
@@ -26837,7 +26981,7 @@
     Modify.prototype.createOrUpdateVertexFeature_ = function createOrUpdateVertexFeature_ (coordinates) {
       var vertexFeature = this.vertexFeature_;
       if (!vertexFeature) {
-        vertexFeature = new Feature(new Point(coordinates));
+        vertexFeature = new Feature(new Point$1(coordinates));
         this.vertexFeature_ = vertexFeature;
         /** @type {VectorSource} */ (this.overlay_.getSource()).addFeature(vertexFeature);
       } else {
@@ -49720,150 +49864,6 @@
 
   }
 
-  /*
-   * Spatial coordinates of a geometric region of interest (ROI) in the DICOM
-   * image coordinate system.
-   */
-  class Scoord {
-
-    constructor() {}
-
-    get graphicData() {
-      throw new Error('Propotype property "graphicData" must be implemented.');
-    }
-
-    get graphicType() {
-      throw new Error('Propotype property "graphicType" must be implemented.');
-    }
-
-    get pixelOriginInterpretation() {
-      // FRAME or VOLUME
-      /* TODO: Consider relative to frame instead of total pixel matrix.
-       * This would complicate scenarios where graphics span multiple frames.
-       */
-      return 'VOLUME';
-    }
-
-    // get fiducialUID() {
-    // }
-
-  }
-
-
-  class Point$1 extends Scoord {
-
-    constructor(coordinates) {
-      super();
-      this.coordinates = coordinates;
-    }
-
-    get graphicData() {
-      return this.coordinates;
-    }
-
-    get graphicType() {
-      return 'POINT';
-    }
-
-  }
-
-
-  class Multipoint extends Scoord {
-
-    constructor(coordinates) {
-      super();
-      this.coordinates = coordinates;
-    }
-
-    get graphicData() {
-      return this.coordinates;
-    }
-
-    get graphicType() {
-      return 'MULTIPOINT';
-    }
-
-  }
-
-
-  class Polyline extends Scoord {
-
-    constructor(coordinates) {
-      super();
-      this.coordinates = coordinates;
-    }
-
-    get graphicData() {
-      /*
-       * A polyline is defined as a series of connected line segments
-       * with ordered vertices denoted by (column,row) pairs.
-       * If the first and last vertices are the same it is a closed polygon.
-       */
-      // TODO: sort coordinates, considering Polygons, where first entry must
-      // equal last entry
-      return this.coordinates;
-    }
-
-    get graphicType() {
-      return 'POLYLINE';
-    }
-
-  }
-
-
-  class Circle$1 extends Scoord {
-
-    constructor(centerCoordinates, radius) {
-      super();
-      this.centerCoordinates = centerCoordinates;
-      this.radius = radius;
-    }
-
-    get graphicData() {
-      /*
-       * A circle defined by two (column,row) pairs.
-       * The first point is the central pixel.
-       * The second point is a pixel on the perimeter of the circle.
-       */
-      return [
-        this.centerCoordinates,
-        [this.centerCoordinates[0], this.centerCoordinates[1] + this.radius]];
-    }
-
-    get graphicType() {
-      return 'CIRCLE';
-    }
-
-  }
-
-
-  class Ellipse extends Scoord {
-
-    constructor(majorAxisEndpointCoordinates, minorAxisEndpointCoordinates) {
-      super();
-      this.majorAxisEndpointCoordinates = majorAxisEndpointCoordinates;
-      this.minorAxisEndpointCoordinates = minorAxisEndpointCoordinates;
-    }
-
-    get graphicData() {
-      /*
-       * An ellipse defined by four pixel (column,row) pairs.
-       * The first two points specify the endpoints of the major axis.
-       * The second two points specify the endpoints of the minor axis.
-       */
-      return [
-        ...this.majorAxisEndpointCoordinates,
-        ...this.minorAxisEndpointCoordinates
-      ];
-    }
-
-
-    get graphicType() {
-      return 'ELLIPSE';
-    }
-
-  }
-
   var dicomwebClient = createCommonjsModule(function (module, exports) {
   (function (global, factory) {
     factory(exports);
@@ -50813,7 +50813,7 @@
     if (type === 'Point') {
       let coordinates = geometry.getCoordinates();
       coordinates = _geometryCoordinates2scoordCoordinates(coordinates);
-      return new Point$1(coordinates);
+      return new Point(coordinates);
     } else if (type === 'Polygon') {
       /*
        * The first linear ring of the array defines the outer-boundary (surface).
@@ -50832,7 +50832,7 @@
       // TODO: Circle may actually represent a Polyline
       let center = _geometryCoordinates2scoordCoordinates(geometry.getCenter());
       let radius = geometry.getRadius();
-      return new Circle$1(center, radius);
+      return new Circle(center, radius);
     } else {
       // TODO: Combine multiple points into MULTIPOINT.
       console.error(`unknown geometry type "${type}"`);
@@ -50845,7 +50845,7 @@
     const data = scoord.graphicData;
     if (type === 'POINT') {
       let coordinates = _scoordCoordinates2geometryCoordinates(data);
-      return new Point(coordinates);
+      return new Point$1(coordinates);
     } else if (type === 'POLYLINE') {
       const coordinates = data.map(d => {
         return _scoordCoordinates2geometryCoordinates(d);
@@ -50863,7 +50863,7 @@
     } else if (type === 'CIRCLE') {
       let center = _scoordCoordinates2geometryCoordinates(scoord.centerCoordinates);
       let radius = scoord.radius;
-      return new Circle(center, radius);
+      return new Circle$1(center, radius);
     } else {
       console.error(`unsupported graphic type "${type}"`);
     }
@@ -51018,7 +51018,6 @@
       tileSizes.reverse();
       origins.reverse();
 
-      // We can't call "this" inside functions.
       const pyramid = this.pyramid;
 
       /*
@@ -51288,12 +51287,7 @@
 
     }
 
-    /* Renders the map.
-     * @param{Object} options options object
-     *
-     * options:
-     *   - container - name of an HTML element for the map
-     *   - controlContainers - names of HTML elements that should be used for given controls
+    /* Renders the images.
      */
     render(options) {
       if (!('container' in options)) {
@@ -51407,7 +51401,6 @@
      */
     activateSelectInteraction(options={}) {
       this.deactivateSelectInteraction();
-      // TODO: "condition", etc.
       this[_interactions].select = new Select({
         layers: [this[_drawingLayer]]
       });
@@ -51429,7 +51422,6 @@
     }
 
     /* Activate modify interaction.
-     * @param{Object} options options object
      */
     activateModifyInteraction(options={}) {
       this.deactivateModifyInteraction();
@@ -51514,54 +51506,21 @@
       this[_drawingLayer].getVisible();
     }
 
-    // set onAddROIHandler(callback) {
-    //   if (typeof callback !== 'function') {
-    //     console.error('callback must be a function')
-    //   }
-    //   this[_drawingSource].on('addfeature', callback);
-    // }
-
-    // set onRemoveROIHandler(callback) {
-    //   if (typeof callback !== 'function') {
-    //     console.error('callback must be a function')
-    //   }
-    //   this[_drawingSource].on('removefeature', callback);
-    // }
-
-    // set onUpdateROIHandler(callback) {
-    //   if (typeof callback !== 'function') {
-    //     console.error('callback must be a function')
-    //   }
-    //   this[_drawingSource].on('changefeature', callback);
-    // }
-
-    // set onUpdateROIPropertiesHandler(callback) {
-    //   if (typeof callback !== 'function') {
-    //     console.error('callback must be a function')
-    //   }
-    //   this[_drawingSource].on('propertychange', callback);
-    // }
-
   }
 
-  let api = {
-    VLWholeSlideMicroscopyImageViewer,
-  };
-  let scoord = {
-    Point: Point$1,
+  const scoord = {
+    Point,
     Multipoint,
     Polyline,
-    Circle: Circle$1,
+    Circle,
     Ellipse
   };
-  let roi = {
-    ROI,
-  };
 
-  exports.api = api;
   exports.scoord = scoord;
-  exports.roi = roi;
+  exports.VLWholeSlideMicroscopyImageViewer = VLWholeSlideMicroscopyImageViewer;
+  exports.ROI = ROI;
 
   Object.defineProperty(exports, '__esModule', { value: true });
 
 })));
+//# sourceMappingURL=dicom-microscopy-viewer.js.map
