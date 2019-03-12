@@ -12,6 +12,8 @@ describe('dicomMicroscopyViewer.api.VLWholeSlideMicroscopyImageViewer', ()=> {
     let viewer;
     const properties = {};
     const circle = new dicomMicroscopyViewer.scoord3d.Circle([1000, 1000, 1], 100);
+    // const circle = new dicomMicroscopyViewer.scoord3d.Circle([18934.22907577224, -19714.66571331125, 1]);
+    //844.455171797701
     const point = new dicomMicroscopyViewer.scoord3d.Point([9.0467, -8.7631, 1]);
     const box = new dicomMicroscopyViewer.scoord3d.Polyline([
         [8.8824, -8.8684, 1],

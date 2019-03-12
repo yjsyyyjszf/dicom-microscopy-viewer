@@ -61,10 +61,9 @@ function _geometry2Scoord3d(geometry, pyramid) {
     });
     return new Polyline(coordinates);
   } else if (type === 'Circle') {
-    let center = _geometryCoordinates2scoord3dCoordinates(geometry.getCenter(), pyramid);
-    // FIXME: radius also needs to be rescaled
-    let radius = geometry.getRadius();
-    return new Circle(center, radius);
+    let coordinates = geometry.getCenter()
+    coordinates = _geometryCoordinates2scoord3dCoordinates(coordinates, pyramid);
+    return new Circle(coordinates);
   } else {
     // TODO: Combine multiple points into MULTIPOINT.
     console.error(`unknown geometry type "${type}"`)
@@ -88,9 +87,8 @@ function _scoord3d2Geometry(scoord3d, pyramid) {
     });
     return new PolygonGeometry([coordinates]);
   } else if (type === 'CIRCLE') {
-    let center = _scoord3dCoordinates2geometryCoordinates(data[0], pyramid);
-    let radius = data[1];
-    return new CircleGeometry(center, radius);
+    let coordinates = _scoord3dCoordinates2geometryCoordinates(data, pyramid);
+    return new CircleGeometry(coordinates);
   } else {
     console.error(`unsupported graphic type "${type}"`)
   }
