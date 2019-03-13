@@ -95,8 +95,15 @@ function _scoord3d2Geometry(scoord3d, pyramid) {
     });
     return new PolygonGeometry([coordinates]);
   } else if (type === 'CIRCLE') {
-    let coordinates = _scoord3dCoordinates2geometryCoordinates(data, pyramid);
-    return new CircleGeometry(coordinates);
+    let coordinates = data.map(d => {
+      return _scoord3dCoordinates2geometryCoordinates(d, pyramid);
+    })
+    // to flat coordinates
+    coordinates = [...coordinates[0].slice(0,2), ...coordinates[1].slice(0,2)]
+
+    // flat coordinates in combination with opt_layout and no opt_radius are also accepted
+    // and internaly it calculates the Radius
+    return new CircleGeometry(coordinates, null, "XY");
   } else {
     console.error(`unsupported graphic type "${type}"`)
   }
