@@ -61,8 +61,16 @@ function _geometry2Scoord3d(geometry, pyramid) {
     });
     return new Polyline(coordinates);
   } else if (type === 'Circle') {
-    let coordinates = geometry.getCenter()
-    coordinates = _geometryCoordinates2scoord3dCoordinates(coordinates, pyramid);
+    // chunking the Flat Coordinates into two arrays within 3 elements each
+    let coordinates = geometry.getFlatCoordinates().reduce((all,one,i) => {
+      const ch = Math.floor(i/2)
+      all[ch] = [].concat((all[ch]||[]),one)
+      return all
+   }, [])
+    coordinates = coordinates.map(c => {
+      c.push(0)
+      return _geometryCoordinates2scoord3dCoordinates(c, pyramid)
+    })
     return new Circle(coordinates);
   } else {
     // TODO: Combine multiple points into MULTIPOINT.
