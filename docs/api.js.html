@@ -1,35 +1,69 @@
-import WebGLMap from 'ol/WebGLMap';
-import Map from 'ol/Map';
-import View from 'ol/View';
-import TileLayer from 'ol/layer/Tile';
-import XYZ from 'ol/source/XYZ';
-import TileGrid from 'ol/tilegrid/TileGrid';
-import Projection from 'ol/proj/Projection';
-import OverviewMap from 'ol/control/OverviewMap';
-import FullScreen from 'ol/control/FullScreen';
-import ScaleLine from 'ol/control/ScaleLine';
-import Draw, {createRegularPolygon, createBox} from 'ol/interaction/Draw';
-import Select from 'ol/interaction/Select';
-import Modify from 'ol/interaction/Modify';
-import VectorLayer from 'ol/layer/Vector';
-import VectorSource from 'ol/source/Vector';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: api.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: api.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import 'ol/ol.css';
 import Collection from 'ol/Collection';
+import Draw, { createRegularPolygon, createBox } from 'ol/interaction/Draw';
+import EVENT from "./events";
 import Feature from 'ol/Feature';
+import FullScreen from 'ol/control/FullScreen';
+import Map from 'ol/Map';
+import Modify from 'ol/interaction/Modify';
+import MouseWheelZoom from 'ol/interaction/MouseWheelZoom';
+import OverviewMap from 'ol/control/OverviewMap';
+import Projection from 'ol/proj/Projection';
+import publish from "./eventPublisher";
+import ScaleLine from 'ol/control/ScaleLine';
+import Select from 'ol/interaction/Select';
+import TileLayer from 'ol/layer/Tile';
+import TileImage from 'ol/source/TileImage';
+import TileGrid from 'ol/tilegrid/TileGrid';
+import VectorSource from 'ol/source/Vector';
+import VectorLayer from 'ol/layer/Vector';
+import View from 'ol/View';
 import { default as PolygonGeometry } from 'ol/geom/Polygon';
 import { default as PointGeometry } from 'ol/geom/Point';
 import { default as LineStringGeometry } from 'ol/geom/LineString';
 import { default as CircleGeometry } from 'ol/geom/Circle';
-import publish from "./eventPublisher";
-import EVENT from "./events";
 import { default as VectorEventType } from "ol/source/VectorEventType";
 import { default as MapEventType } from "ol/MapEventType";
+import { defaults as defaultInteractions } from 'ol/interaction';
 
 import { getCenter } from 'ol/extent';
-import { toStringXY } from 'ol/coordinate';
+import { toStringXY, rotate } from 'ol/coordinate';
 
 import { formatImageMetadata, getFrameMapping } from './metadata.js';
 import { ROI } from './roi.js';
-import { generateUID } from './utils.js';
+import {
+    generateUID,
+    mapPixelCoordToSlideCoord,
+    mapSlideCoordToPixelCoord
+} from './utils.js';
 import {
   Point,
   Multipoint,
@@ -41,13 +75,130 @@ import {
 
 import DICOMwebClient from 'dicomweb-client/build/dicomweb-client.js'
 
+
+/** Extracts value of Pixel Spacing attribute from metadata.
+ *
+ * @param {Object} metadata - Metadata of a DICOM VL Whole Slide Microscopy Image instance
+ * @returns {number[]} Spacing between pixel columns and rows in millimeter
+ * @private
+ */
 function _getPixelSpacing(metadata) {
   const functionalGroup = metadata.SharedFunctionalGroupsSequence[0];
   const pixelMeasures = functionalGroup.PixelMeasuresSequence[0];
   return pixelMeasures.PixelSpacing;
 }
 
+
+/** Determines whether image needs to be rotated relative to slide
+ * coordinate system based on direction cosines.
+ * We want to rotate all images such that the X axis of the slide coordinate
+ * system is the vertical axis (ordinate) of the viewport and the Y axis
+ * of the slide coordinate system is the horizontal axis (abscissa) of the
+ * viewport. Note that this is opposite to the Openlayers coordinate system.
+ * There are only planar rotations, since the total pixel matrix is
+ * parallel to the slide surface. Here, we further assume that rows and
+ * columns of total pixel matrix are parallel to the borders of the slide,
+ * i.e. the x and y axis of the slide coordinate system.
+ *
+ * The row direction (left to right) of the Total Pixel Matrix
+ * is defined by the first three values.
+ * The three values specify how the direction changes from the last pixel
+ * to the first pixel in the row along each of the three axes of the
+ * slide coordinate system (x, y, z), i.e. it express in which direction one
+ * is moving in the slide coordinate system when the COLUMN index changes.
+ * The column direction (top to bottom) of the Total Pixel Matrix
+ * is defined by the second three values.
+ * The three values specify how the direction changes from the last pixel
+ * to the first pixel in the column along each of the three axes of the
+ * slide coordinate system (x, y, z), i.e. it express in which direction one
+ * is moving in the slide coordinate system when the ROW index changes.
+ *
+ * @param {Object} metadata - Metadata of a DICOM VL Whole Slide Microscopy Image instance
+ * @returns {number} Rotation in radians
+ * @private
+*/
+function _getRotation(metadata) {
+  var degrees;
+  if (
+    (metadata.ImageOrientationSlide[0] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[1] === -1) &amp;&amp;
+    (metadata.ImageOrientationSlide[2] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[3] === -1) &amp;&amp;
+    (metadata.ImageOrientationSlide[4] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[5] === 0)
+  ) {
+    /*
+     * The Total Pixel Matrix is rotated with respect to the slide coordinate
+     * system by 180 degrees, such that an increase along the row direction
+     * (left to right) leads to lower Y coordinate values and an increase
+     * along the column direction (top to bottom) leads to lower X coordinate
+     * values.
+     */
+    degrees = 180;
+  } else if (
+    (metadata.ImageOrientationSlide[0] === 1) &amp;&amp;
+    (metadata.ImageOrientationSlide[1] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[2] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[3] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[4] === -1) &amp;&amp;
+    (metadata.ImageOrientationSlide[5] === 0)
+  ) {
+    /*
+     * The Total Pixel Matrix is rotated with respect to the slide coordinate
+     * system by 90 degrees, such that an increase along the row direction
+     * (left to right) leads to higher X coordinate values and an increase
+     * along the column direction (top to bottom) leads to lower Y coordinate
+     * values.
+     */
+    degrees = 90;
+  } else if (
+    (metadata.ImageOrientationSlide[0] === -1) &amp;&amp;
+    (metadata.ImageOrientationSlide[1] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[2] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[3] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[4] === 1) &amp;&amp;
+    (metadata.ImageOrientationSlide[5] === 0)
+  ) {
+    /*
+     * The Total Pixel Matrix is rotated with respect to the slide coordinate
+     * system by 270 degrees, such that an increase along the row direction
+     * (left to right) leads to lower X coordinate values and an increase
+     * along the column direction (top to bottom) leads to higher Y coordinate
+     * values.
+     */
+    degrees = 270;
+  } else if (
+    (metadata.ImageOrientationSlide[0] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[1] === 1) &amp;&amp;
+    (metadata.ImageOrientationSlide[2] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[3] === 1) &amp;&amp;
+    (metadata.ImageOrientationSlide[4] === 0) &amp;&amp;
+    (metadata.ImageOrientationSlide[5] === 0)
+  ) {
+    /*
+     * The Total Pixel Matrix is aligned with the slide coordinate system
+     * such that an increase along the row direction (left to right) leads to
+     * higher Y coordinate values and an increase along the column direction
+     * (top to bottom) leads to higher X coordinate values.
+     */
+    degrees = 0;
+  } else {
+    throw new Error(`Unexpected image orientation ${metadata.ImageOrientationSlide}`);
+  }
+  return degrees * (Math.PI / 180);
+}
+
+
+/** Converts a vector graphic from an Openlayers Geometry into a DICOM SCOORD3D
+ * representation.
+ *
+ * @param {Object} geometry - Openlayers Geometry
+ * @param {Object[]} pyramid - Metadata for resolution levels of image pyramid
+ * @returns {Scoord3D} DICOM Microscopy Viewer Scoord3D
+ * @private
+ */
 function _geometry2Scoord3d(geometry, pyramid) {
+  console.info('map coordinates from pixel matrix to slide coordinate system')
   const frameOfReferenceUID = pyramid[pyramid.length-1].FrameOfReferenceUID;
   const type = geometry.getType();
   if (type === 'Point') {
@@ -78,20 +229,22 @@ function _geometry2Scoord3d(geometry, pyramid) {
       frameOfReferenceUID: frameOfReferenceUID
     });
   } else if (type === 'Circle') {
-    let centerCoordinate = geometry.getCenter();
-    let radius = geometry.getRadius();
+    const center = geometry.getCenter();
+    const radius = geometry.getRadius();
     // Endpoints of major and  minor axis of the ellipse.
-    // In case of a circle they both have the same length.
     let coordinates = [
-      [centerCoordinate[0] - radius, centerCoordinate[1]],
-      [centerCoordinate[0] + radius, centerCoordinate[1]],
-      [centerCoordinate[0], centerCoordinate[1] - radius],
-      [centerCoordinate[0], centerCoordinate[1] + radius],
+      [center[0] - radius, center[1], 0],
+      [center[0] + radius, center[1], 0],
+      [center[0], center[1] - radius, 0],
+      [center[0], center[1] + radius, 0],
     ];
     coordinates = coordinates.map(c => {
-      c.push(0)
-      return _geometryCoordinates2scoord3dCoordinates(c, pyramid)
+        return _geometryCoordinates2scoord3dCoordinates(c, pyramid);
     })
+
+    // const metadata = pyramid[pyramid.length-1];
+    // const pixelSpacing = _getPixelSpacing(metadata);
+
     return new Ellipse({
       coordinates,
       frameOfReferenceUID: frameOfReferenceUID
@@ -102,9 +255,19 @@ function _geometry2Scoord3d(geometry, pyramid) {
   }
 }
 
+/** Converts a vector graphic from a DICOM SCOORD3D into an Openlayers Geometry
+ * representation.
+ *
+ * @param {Scoord3D} scoord3d - DICOM Microscopy Viewer Scoord3D
+ * @param {Object[]} pyramid - Metadata for resolution levels of image pyramid
+ * @returns {Object} Openlayers Geometry
+ * @private
+ */
 function _scoord3d2Geometry(scoord3d, pyramid) {
+  console.info('map coordinates from slide coordinate system to pixel matrix')
   const type = scoord3d.graphicType;
   const data = scoord3d.graphicData;
+
   if (type === 'POINT') {
     let coordinates = _scoord3dCoordinates2geometryCoordinates(data, pyramid);
     return new PointGeometry(coordinates);
@@ -121,12 +284,12 @@ function _scoord3d2Geometry(scoord3d, pyramid) {
   } else if (type === 'ELLIPSE') {
     // TODO: ensure that the ellipse represents a circle, i.e. that
     // major and minor axis form a right angle and have the same length
-    let majorAxisCoordinates = data.slice(0, 2);
-    let minorAxisCoordinates = data.slice(2, 4);
+    const majorAxisCoordinates = data.slice(0, 2);
+    const minorAxisCoordinates = data.slice(2, 4);
     // Circle is defined by two points: the center point and a point on the
     // circumference.
-    let point1 = majorAxisCoordinates[0];
-    let point2 = majorAxisCoordinates[1];
+    const point1 = majorAxisCoordinates[0];
+    const point2 = majorAxisCoordinates[1];
     let coordinates = [
       [
         (point1[0] + point2[0]) / parseFloat(2),
@@ -150,33 +313,45 @@ function _scoord3d2Geometry(scoord3d, pyramid) {
 }
 
 function _geometryCoordinates2scoord3dCoordinates(coordinates, pyramid) {
-  return _coordinateFormatGeometry2Scoord3d([coordinates[0] + 1, coordinates[1], coordinates[2]], pyramid);
+  return _coordinateFormatGeometry2Scoord3d([coordinates[0], coordinates[1], coordinates[2]], pyramid);
 }
 
 function _scoord3dCoordinates2geometryCoordinates(coordinates, pyramid) {
   return _coordinateFormatScoord3d2Geometry([coordinates[0], coordinates[1], coordinates[2]], pyramid)
 }
 
-/*
-  * Translate pixel units of total pixel matrix into millimeters of
-  * slide coordinate system
-*/
+/** Translates coordinates of Total Pixel Matrix in pixel unit into coordinates
+ * in Frame of Reference (slide coordinate system) in millimeter unit.
+ *
+ * @param {number[]|number[][]} coordinates - Coordinates in Total Pixel Matrix
+ * @param {Object[]} pyramid - Metadata for resolution levels of image pyramid
+ * @returns {number[]|number[][]} Coordinates in Frame of Reference
+ * @private
+ */
 function _coordinateFormatGeometry2Scoord3d(coordinates, pyramid) {
   let transform = false;
-  if(!(coordinates[0] instanceof Array)) {
+  if(!Array.isArray(coordinates[0])) {
     coordinates = [coordinates];
     transform = true;
   }
   const metadata = pyramid[pyramid.length-1];
   const origin = metadata.TotalPixelMatrixOriginSequence[0];
-  const xOffset = Number(origin.XOffsetInSlideCoordinateSystem);
-  const yOffset = Number(origin.YOffsetInSlideCoordinateSystem);
-  const pixelSpacing = _getPixelSpacing(metadata);
-  coordinates = coordinates.map(point => {
-    const x = Number((xOffset + (point[0] * pixelSpacing[0])).toFixed(4));
-    const y = Number((yOffset - ((point[1] - 1) * pixelSpacing[1])).toFixed(4));
-    const z = Number((0).toFixed(4));
-    return [x, y, z];
+  const orientation = metadata.ImageOrientationSlide;
+  const spacing = _getPixelSpacing(metadata);
+  const offset = [
+    Number(origin.XOffsetInSlideCoordinateSystem),
+    Number(origin.YOffsetInSlideCoordinateSystem),
+  ];
+
+  coordinates = coordinates.map(c => {
+    const pixelCoord = [c[0], -(c[1] + 1)];
+    const slideCoord = mapPixelCoordToSlideCoord({
+      orientation,
+      spacing,
+      offset,
+      point: pixelCoord
+    });
+    return [slideCoord[0], slideCoord[1], 0];
   });
   if (transform) {
     return coordinates[0];
@@ -184,26 +359,39 @@ function _coordinateFormatGeometry2Scoord3d(coordinates, pyramid) {
   return coordinates;
 }
 
-/*
-  * Translate millimeters into pixel units of total pixel matrix of
-  * slide coordinate system
-*/
+/** Translates coordinates of coordinates in Frame of Reference
+ * (slide coordinate system) in millimeter unit into coordinates in
+ * Total Pixel Matrix in pixel unit.
+ *
+ * @param {number[]|number[][]} coordinates - Coordinates in Frame of Reference
+ * @param {Object[]} pyramid - Metadata for resolution levels of image pyramid
+ * @returns {number[]|number[][]} Coordinates in Total Pixel Matrix
+ * @private
+ */
 function _coordinateFormatScoord3d2Geometry(coordinates, pyramid) {
   let transform = false;
-  if(!(coordinates[0] instanceof Array)) {
+  if(!Array.isArray(coordinates[0])) {
     coordinates = [coordinates];
     transform = true;
   }
   const metadata = pyramid[pyramid.length-1];
+  const orientation = metadata.ImageOrientationSlide;
+  const spacing = _getPixelSpacing(metadata);
   const origin = metadata.TotalPixelMatrixOriginSequence[0];
-  const xOffset = Number(origin.XOffsetInSlideCoordinateSystem);
-  const yOffset = Number(origin.YOffsetInSlideCoordinateSystem);
-  coordinates = coordinates.map(coord =>{
-    const pixelSpacing = _getPixelSpacing(pyramid[pyramid.length-1]);
-    const x = (coord[0] / pixelSpacing[0] - 1) - xOffset;
-    const y = -(coord[1] /pixelSpacing[1] - 1) - yOffset;
-    const z = coord[2];
-    return [x, y, z];
+  const offset = [
+    Number(origin.XOffsetInSlideCoordinateSystem),
+    Number(origin.YOffsetInSlideCoordinateSystem),
+  ];
+
+  coordinates = coordinates.map(c =>{
+    const slideCoord = [c[0], c[1]];
+    const pixelCoord = mapSlideCoordToPixelCoord({
+      offset,
+      orientation,
+      spacing,
+      point: slideCoord
+    });
+    return [pixelCoord[0], -(pixelCoord[1] + 1), 0];
   });
   if (transform) {
     return coordinates[0];
@@ -211,6 +399,14 @@ function _coordinateFormatScoord3d2Geometry(coordinates, pyramid) {
   return coordinates;
 }
 
+/** Extracts and transforms the region of interest (ROI) from an Openlayers
+ * Feature.
+ *
+ * @param {Object} feature - Openlayers Feature
+ * @param {Object[]} pyramid - Metadata for resolution levels of image pyramid
+ * @returns {ROI} Region of interest
+ * @private
+ */
 function _getROIFromFeature(feature, pyramid){
   let roi = {}
   if (feature !== undefined) {
@@ -226,29 +422,39 @@ function _getROIFromFeature(feature, pyramid){
   return roi;
 }
 
-const _usewebgl = Symbol('usewebgl');
-const _map = Symbol('map');
-const _features = Symbol('features');
-const _drawingSource = Symbol('drawingSource');
-const _drawingLayer = Symbol('drawingLayer');
-const _segmentations = Symbol('segmentations');
 const _client = Symbol('client');
 const _controls = Symbol('controls');
+const _drawingLayer = Symbol('drawingLayer');
+const _drawingSource = Symbol('drawingSource');
+const _features = Symbol('features');
+const _imageLayer = Symbol('imageLayer');
 const _interactions = Symbol('interactions');
+const _map = Symbol('map');
+const _metadata = Symbol('metadata');
 const _pyramidMetadata = Symbol('pyramidMetadata');
 const _pyramidFrameMappings = Symbol('pyramidFrameMappings');
 const _pyramidBaseMetadata = Symbol('pyramidMetadataBase');
-const _metadata = Symbol('metadata');
+const _segmentations = Symbol('segmentations');
+const _usewebgl = Symbol('usewebgl');
 
 
+/** Interactive viewer for DICOM VL Whole Slide Microscopy Image instances
+ * with graphic annotation capabilities.
+ *
+ * @class
+ * @memberof api
+ */
 class VLWholeSlideMicroscopyImageViewer {
 
-  /*
-   * options:
-   *   - client (instance of DICOMwebClient)
-   *   - metadata (array of DICOM JSON metadata for each image instance)
-   *   - retrieveRendered (whether frames should be retrieved using DICOMweb RetrieveRenderedTransaction; default: true)
-   *   - useWebGL (whether WebGL renderer should be used; default: true)
+  /**
+   * Create a viewer instance.
+   *
+   * @param {Object} options
+   * @param {Object} options.client - A DICOMwebClient instance for interacting with an origin server over HTTP.
+   * @param {Object[]} options.metadata - An array of DICOM JSON metadata objects, one for each VL Whole Slide Microscopy Image instance.
+   * @param {string[]} [options.controls=[]] - Names of viewer control elements that should be included in the viewport.
+   * @param {boolean} [options.retrieveRendered=true] - Whether image frames should be retrieved via DICOMweb prerendered by the server.
+   * @param {boolean} [options.useWebGL=true] - Whether WebGL renderer should be used.
    */
   constructor(options) {
     if ('useWebGL' in options) {
@@ -302,7 +508,7 @@ class VLWholeSlideMicroscopyImageViewer {
     this[_pyramidMetadata] = [];
     this[_pyramidFrameMappings] = [];
     let frameMappings = this[_metadata].map(m => getFrameMapping(m));
-    for (let i = 0; i < this[_metadata].length; i++) {
+    for (let i = 0; i &lt; this[_metadata].length; i++) {
       const cols = this[_metadata][i].TotalPixelMatrixColumns;
       const rows = this[_metadata][i].TotalPixelMatrixRows;
       const numberOfFrames = this[_metadata][i].NumberOfFrames;
@@ -312,9 +518,9 @@ class VLWholeSlideMicroscopyImageViewer {
       */
       let alreadyExists = false;
       let index = null;
-      for (let j = 0; j < this[_pyramidMetadata].length; j++) {
+      for (let j = 0; j &lt; this[_pyramidMetadata].length; j++) {
         if (
-            (this[_pyramidMetadata][j].TotalPixelMatrixColumns === cols) &&
+            (this[_pyramidMetadata][j].TotalPixelMatrixColumns === cols) &amp;&amp;
             (this[_pyramidMetadata][j].TotalPixelMatrixRows === rows)
           ) {
           alreadyExists = true;
@@ -357,43 +563,39 @@ class VLWholeSlideMicroscopyImageViewer {
      * level to construct the Openlayers map.
     */
     const tileSizes = [];
-    const totalSizes = [];
+    const tileGridSizes = [];
     const resolutions = [];
     const origins = [];
     const offset = [0, -1];
     const basePixelSpacing = _getPixelSpacing(this[_pyramidBaseMetadata]);
-    const baseColumns = this[_pyramidBaseMetadata].Columns;
-    const baseRows = this[_pyramidBaseMetadata].Rows;
     const baseTotalPixelMatrixColumns = this[_pyramidBaseMetadata].TotalPixelMatrixColumns;
     const baseTotalPixelMatrixRows = this[_pyramidBaseMetadata].TotalPixelMatrixRows;
-    const baseColFactor = Math.ceil(baseTotalPixelMatrixColumns / baseColumns);
-    const baseRowFactor = Math.ceil(baseTotalPixelMatrixRows / baseRows);
-    const baseAdjustedTotalPixelMatrixColumns = baseColumns * baseColFactor;
-    const baseAdjustedTotalPixelMatrixRows = baseRows * baseRowFactor;
+    const baseColumns = this[_pyramidBaseMetadata].Columns;
+    const baseRows = this[_pyramidBaseMetadata].Rows;
+    const baseNColumns = Math.ceil(baseTotalPixelMatrixColumns / baseColumns);
+    const baseNRows = Math.ceil(baseTotalPixelMatrixRows / baseRows);
     for (let j = (nLevels - 1); j >= 0; j--) {
       const columns = this[_pyramidMetadata][j].Columns;
       const rows = this[_pyramidMetadata][j].Rows;
       const totalPixelMatrixColumns = this[_pyramidMetadata][j].TotalPixelMatrixColumns;
       const totalPixelMatrixRows = this[_pyramidMetadata][j].TotalPixelMatrixRows;
       const pixelSpacing = _getPixelSpacing(this[_pyramidMetadata][j]);
-      const colFactor = Math.ceil(totalPixelMatrixColumns / columns);
-      const rowFactor = Math.ceil(totalPixelMatrixRows / rows);
-      const adjustedTotalPixelMatrixColumns = columns * colFactor;
-      const adjustedTotalPixelMatrixRows = rows * rowFactor;
+      const nColumns = Math.ceil(totalPixelMatrixColumns / columns);
+      const nRows = Math.ceil(totalPixelMatrixRows / rows);
       tileSizes.push([
         columns,
-        rows
+        rows,
       ]);
-      totalSizes.push([
-        adjustedTotalPixelMatrixColumns,
-        adjustedTotalPixelMatrixRows
+      tileGridSizes.push([
+        nColumns,
+        nRows,
       ]);
 
       /*
        * Compute the resolution at each pyramid level, since the zoom
        * factor may not be the same between adjacent pyramid levels.
       */
-      let zoomFactor = pixelSpacing[0] / basePixelSpacing[0];
+      let zoomFactor = baseTotalPixelMatrixColumns / totalPixelMatrixColumns;
       resolutions.push(zoomFactor);
 
       /*
@@ -405,6 +607,7 @@ class VLWholeSlideMicroscopyImageViewer {
     }
     resolutions.reverse();
     tileSizes.reverse();
+    tileGridSizes.reverse();
     origins.reverse();
 
     // Functions won't be able to access "this"
@@ -412,8 +615,7 @@ class VLWholeSlideMicroscopyImageViewer {
     const pyramidFrameMappings = this[_pyramidFrameMappings];
 
     /*
-     * Define custom tile URL function to retrive frames via DICOMweb
-     * WADO-RS.
+     * Define custom tile URL function to retrive frames via DICOMweb WADO-RS.
      */
     const tileUrlFunction = (tileCoord, pixelRatio, projection) => {
       /*
@@ -427,12 +629,7 @@ class VLWholeSlideMicroscopyImageViewer {
        */
       let z = tileCoord[0];
       let y = tileCoord[1] + 1;
-      /*
-       * The vertical axis is inverted for the chosen tile source, i.e.
-       * it starts at -1 at the top left corner and descreases along the
-       * vertical axis to the lower left corner of the viewport.
-       */
-      let x = -(tileCoord[2] + 1) + 1;
+      let x = tileCoord[2] + 1;
       let index = x + "-" + y;
       let path = pyramidFrameMappings[z][index];
       if (path === undefined) {
@@ -457,7 +654,7 @@ class VLWholeSlideMicroscopyImageViewer {
       const uint8Array = new Uint8Array(data);
       const chunkSize = 0x8000;
       const strArray = [];
-      for (let i=0; i < uint8Array.length; i+=chunkSize) {
+      for (let i=0; i &lt; uint8Array.length; i+=chunkSize) {
         const str = String.fromCharCode.apply(
           null, uint8Array.subarray(i, i + chunkSize)
         );
@@ -517,44 +714,13 @@ class VLWholeSlideMicroscopyImageViewer {
      * number of rows in the total pixel matrix.
     */
     const extent = [
-      0,                            // min X
-      -baseTotalPixelMatrixRows,    // min Y
-      baseTotalPixelMatrixColumns,  // max X
-      -1                            // max Y
+      0,                                // min X
+      -(baseTotalPixelMatrixRows + 1),  // min Y
+      baseTotalPixelMatrixColumns,      // max X
+      -1                                // max Y
     ];
 
-    /*
-     * Determine whether image needs to be rotated relative to slide
-     * coordinate system based on direction cosines.
-     * There are only planar rotations, since the total pixel matrix is
-     * parallel to the slide surface. Here, we further assume that rows and
-     * columns of total pixel matrix are parallel to the borders of the slide,
-     * i.e. the x and y axis of the slide coordinate system.
-     * Hence, we only account for the case where the image may be rotated by
-     * 180 degrees.
-    */
-    var degrees = 0;
-    if (
-      (this[_pyramidBaseMetadata].ImageOrientationSlide[1] === -1) &&
-      (this[_pyramidBaseMetadata].ImageOrientationSlide[3] === -1)
-    ) {
-      /*
-       * The row direction (left to right) of the total pixel matrix
-       * is defined by the first three values.
-       * The three values specify how the direction changes from the last pixel
-       * to the first pixel in the row along each of the three axes of the
-       * slide coordinate system (x, y, z), i.e. it express in which direction one
-       * is moving in the slide coordinate system when the COLUMN index changes.
-       * The column direction (top to bottom) of the total pixel matrix
-       * is defined by the first three values.
-       * The three values specify how the direction changes from the last pixel
-       * to the first pixel in the column along each of the three axes of the
-       * slide coordinate system (x, y, z), i.e. it express in which direction one
-       * is moving in the slide coordinate system when the ROW index changes.
-      */
-      degrees = 180;
-    }
-    const rotation = degrees * (Math.PI / 180);
+    const rotation = _getRotation(this[_pyramidBaseMetadata]);
 
     /*
      * Specify projection to prevent default automatic projection
@@ -591,15 +757,15 @@ class VLWholeSlideMicroscopyImageViewer {
       extent: extent,
       origins: origins,
       resolutions: resolutions,
-      sizes: totalSizes,
+      sizes: tileGridSizes,
       tileSizes: tileSizes
     });
 
     /*
-     * We use the implemented XYZ tile source but customize it to retrieve
+     * We use the existing TileImage source but customize it to retrieve
      * frames (load tiles) via DICOMweb WADO-RS.
      */
-    const rasterSource = new XYZ({
+    const rasterSource = new TileImage({
       crossOrigin: "Anonymous",
       tileGrid: tileGrid,
       projection: projection,
@@ -608,10 +774,10 @@ class VLWholeSlideMicroscopyImageViewer {
     rasterSource.setTileUrlFunction(tileUrlFunction);
     rasterSource.setTileLoadFunction(tileLoadFunction);
 
-    const imageLayer = new TileLayer({
+    this[_imageLayer] = new TileLayer({
       extent: extent,
       source: rasterSource,
-      preload: 1,
+      preload: 0,
       projection: projection
     });
 
@@ -638,12 +804,6 @@ class VLWholeSlideMicroscopyImageViewer {
       rotation: rotation
     });
 
-    const overviewView = new View({
-      projection: projection,
-      resolutions: resolutions,
-      rotation: rotation
-    });
-
     this[_interactions] = {
       draw: undefined,
       select: undefined,
@@ -660,8 +820,22 @@ class VLWholeSlideMicroscopyImageViewer {
       this[_controls].fullscreen = new FullScreen();
     }
     if (options.controls.has('overview')) {
+      const overviewImageLayer = new TileLayer({
+        extent: extent,
+        source: rasterSource,
+        preload: 0,
+        projection: projection
+      });
+
+      const overviewView = new View({
+        projection: projection,
+        resolutions: resolutions,
+        rotation: rotation
+      });
+
       this[_controls].overview = new OverviewMap({
         view: overviewView,
+        layers: [overviewImageLayer],
         collapsed: true,
       });
     }
@@ -670,40 +844,28 @@ class VLWholeSlideMicroscopyImageViewer {
      * Creates the map with the defined layers and view and renders it via
      * WebGL.
      */
-    if (this[_usewebgl]) {
-      this[_map] = new WebGLMap({
-        layers: [imageLayer, this[_drawingLayer]],
-        view: view,
-        controls: [],
-        loadTilesWhileAnimating: true,
-        loadTilesWhileInteracting: true,
-        logo: false
-      });
-    } else {
-
-      this[_map] = new Map({
-        layers: [imageLayer, this[_drawingLayer]],
-        view: view,
-        controls: [],
-        loadTilesWhileAnimating: true,
-        loadTilesWhileInteracting: true,
-        logo: false
-      });
-    }
+    this[_map] = new Map({
+      layers: [this[_imageLayer], this[_drawingLayer]],
+      view: view,
+      controls: [],
+      keyboardEventTarget: document,
+    });
+    this[_map].addInteraction(new MouseWheelZoom());
 
     for (let control in this[_controls]) {
       this[_map].addControl(this[_controls][control]);
     }
-    this[_map].getView().fit(extent, this[_map].getSize());
-
+    this[_map].getView().fit(extent);
   }
 
+  /** Resize the viewer to fit the viewport. */
   resize(){
     this[_map].updateSize();
   }
-  
 
-  /* Renders the images.
+  /** Renders the images in the specified viewport container.
+   * @param {Object} options - Rendering options.
+   * @param {(string|HTMLElement)} options.container - HTML Element in which the viewer should be injected.
    */
   render(options) {
     if (!('container' in options)) {
@@ -783,10 +945,13 @@ class VLWholeSlideMicroscopyImageViewer {
 
   }
 
-  /* Activate draw interaction.
+  /** Activates the draw interaction for graphic annotation of regions of interest.
+   * @param {Object} options - Drawing options.
+   * @param {string} options.geometryType - Name of the geometry type (point, circle, box, polygon, freehandPolygon, line, freehandLine)
    */
   activateDrawInteraction(options) {
     this.deactivateDrawInteraction();
+    console.info('activate "draw" interaction')
 
     const customOptionsMapping = {
       point: {
@@ -850,23 +1015,30 @@ class VLWholeSlideMicroscopyImageViewer {
 
   }
 
-  /* Deactivate draw interaction.
-   */
+  /** Deactivates draw interaction. */
   deactivateDrawInteraction() {
+    console.info('deactivate "draw" interaction')
     if (this[_interactions].draw !== undefined) {
       this[_map].removeInteraction(this[_interactions].draw);
       this[_interactions].draw = undefined;
     }
   }
 
+  /** Whether draw interaction is active
+   *
+   * @type {boolean}
+   */
   get isDrawInteractionActive() {
     return this[_interactions].draw !== undefined;
   }
 
-  /* Activate select interaction.
+  /* Activates select interaction.
+   *
+   * @param {Object} options - Selection options.
    */
   activateSelectInteraction(options={}) {
     this.deactivateSelectInteraction();
+    console.info('activate "select" interaction')
     this[_interactions].select = new Select({
       layers: [this[_drawingLayer]]
     });
@@ -880,43 +1052,59 @@ class VLWholeSlideMicroscopyImageViewer {
     this[_map].addInteraction(this[_interactions].select);
   }
 
-  /* Deactivate select interaction.
-   */
+  /** Deactivates select interaction. */
   deactivateSelectInteraction() {
+    console.info('deactivate "select" interaction')
     if (this[_interactions].select) {
       this[_map].removeInteraction(this[_interactions].select);
       this[_interactions].select = undefined;
     }
   }
 
+  /** Whether select interaction is active.
+   *
+   * @type {boolean}
+   */
   get isSelectInteractionActive() {
     return this[_interactions].select !== undefined;
   }
 
-  /* Activate modify interaction.
+  /** Activates modify interaction.
+   *
+   * @param {Object} options - Modification options.
    */
   activateModifyInteraction(options={}) {
     this.deactivateModifyInteraction();
+    console.info('activate "modify" interaction')
     this[_interactions].modify = new Modify({
       features: this[_features],  // TODO: or source, i.e. "drawings"???
     });
     this[_map].addInteraction(this[_interactions].modify);
   }
 
-  /* Deactivate modify interaction.
-   */
+  /** Deactivates modify interaction. */
   deactivateModifyInteraction() {
+    console.info('deactivate "modify" interaction')
     if (this[_interactions].modify) {
       this[_map].removeInteraction(this[_interactions].modify);
       this[_interactions].modify = undefined;
     }
   }
 
+  /** Whether modify interaction is active.
+   *
+   * @type {boolean}
+   */
   get isModifyInteractionActive() {
     return this[_interactions].modify !== undefined;
   }
 
+  /** Gets all annotated regions of interest.
+   *
+   * @returns {ROI[]} Array of regions of interest.
+   */
   getAllROIs() {
+    console.info('get all ROIs')
     let rois = [];
     this[_features].forEach((item) => {
         rois.push(this.getROI(item.getId()));
@@ -924,21 +1112,41 @@ class VLWholeSlideMicroscopyImageViewer {
     return rois;
   }
 
+  /** Number of annotated regions of interest.
+   *
+   * @type {number}
+   */
   get numberOfROIs() {
     return this[_features].getLength();
   }
 
+  /** Gets an individual annotated regions of interest.
+   *
+   * @param {string} uid - Unique identifier of the region of interest
+   * @returns {ROI} Regions of interest.
+   */
   getROI(uid) {
+    console.info(`get ROI ${uid}`)
     const feature = this[_drawingSource].getFeatureById(uid);
     return _getROIFromFeature(feature, this[_pyramidMetadata]);
   }
 
+  /** Pops the most recently annotated regions of interest.
+   *
+   * @returns {ROI} Regions of interest.
+   */
   popROI() {
+    console.info('pop ROI')
     const feature = this[_features].pop();
     return _getROIFromFeature(feature, this[_pyramidMetadata]);
   }
 
+  /** Adds a regions of interest.
+   *
+   * @param {ROI} Regions of interest.
+   */
   addROI(item) {
+    console.info(`add ROI ${item.uid}`)
     const geometry = _scoord3d2Geometry(item.scoord3d, this[_pyramidMetadata]);
     const feature = new Feature(geometry);
     feature.setProperties(item.properties, true);
@@ -946,27 +1154,50 @@ class VLWholeSlideMicroscopyImageViewer {
     this[_features].push(feature);
   }
 
+  /** Removes an individual regions of interest.
+   *
+   * @param {string} uid - Unique identifier of the region of interest
+   */
   removeROI(uid) {
+    console.info(`remove ROI ${uid}`)
     const feature = this[_drawingSource].getFeatureById(uid);
     this[_features].remove(feature);
   }
 
+  /** Removes all annotated regions of interest. */
   removeAllROIs() {
+    console.info('remove all ROIs')
     this[_features].clear();
   }
 
+  /** Hides annotated regions of interest such that they are no longer
+   *  visible on the viewport.
+   */
   hideROIs() {
+    console.info('hide ROIs')
     this[_drawingLayer].setVisible(false);
   }
 
+  /** Shows annotated regions of interest such that they become visible
+   *  on the viewport ontop of the images.
+   */
   showROIs() {
+    console.info('show ROIs')
     this[_drawingLayer].setVisible(true);
   }
 
+  /** Whether annotated regions of interest are currently visible.
+   *
+   * @type {boolean}
+   */
   get areROIsVisible() {
     return this[_drawingLayer].getVisible();
   }
 
+  /** DICOM metadata for each VL Whole Slide Microscopy Image instance.
+   *
+   * @type {Object[]}
+   */
   get imageMetadata() {
     return this[_pyramidMetadata];
   }
@@ -974,3 +1205,26 @@ class VLWholeSlideMicroscopyImageViewer {
 }
 
 export { VLWholeSlideMicroscopyImageViewer };
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Namespaces</h3><ul><li><a href="api.html">api</a></li><li><a href="events.html">events</a></li><li><a href="roi.html">roi</a></li><li><a href="scoord3d.html">scoord3d</a></li><li><a href="utils.html">utils</a></li></ul><h3>Classes</h3><ul><li><a href="api.VLWholeSlideMicroscopyImageViewer.html">VLWholeSlideMicroscopyImageViewer</a></li><li><a href="roi.ROI.html">ROI</a></li><li><a href="scoord3d.Ellipse.html">Ellipse</a></li><li><a href="scoord3d.Ellipsoid.html">Ellipsoid</a></li><li><a href="scoord3d.Multipoint.html">Multipoint</a></li><li><a href="scoord3d.Point.html">Point</a></li><li><a href="scoord3d.Polygon.html">Polygon</a></li><li><a href="scoord3d.Polyline.html">Polyline</a></li></ul><h3>Tutorials</h3><ul><li><a href="tutorial-index_.html">index</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 3.6.5</a> on Sun Sep 06 2020 12:02:03 GMT-0400 (Eastern Daylight Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

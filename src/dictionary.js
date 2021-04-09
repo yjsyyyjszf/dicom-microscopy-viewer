@@ -1,3 +1,8 @@
+/** Maps DICOM Attribute Tag to Keyword.
+ *
+ * @constant {Object}
+ * @private
+ */
 const tagToKeyword = {
   '00000000': 'CommandGroupLength',
   '00000001': 'CommandLengthToEnd',
@@ -4255,6 +4260,11 @@ const tagToKeyword = {
 };
 Object.freeze(tagToKeyword);
 
+/** Maps DICOM Attribute Keyword to Tag.
+ *
+ * @constant {Object}
+ * @private
+ */
 const keywordToTag = {
   'CommandGroupLength': '00000000',
   'CommandLengthToEnd': '00000001',

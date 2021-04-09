@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: metadata.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: metadata.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import { keywordToTag, tagToKeyword } from './dictionary';
+
+/** Determines the mapping of pyramid tile positions to frame numbers.
+ *
+ * @param {Object} Formatted metadata of a VL Whole Slide Microscopy Image instance
+ * @returns {Object} Mapping of pyramid tile position (Row-Column) to frame URI
+ * @private
+ */
+function getFrameMapping(metadata) {
+  const rows = metadata.Rows;
+  const columns = metadata.Columns;
+  const totalPixelMatrixColumns = metadata.TotalPixelMatrixColumns;
+  const totalPixelMatrixRows = metadata.TotalPixelMatrixRows;
+  const sopInstanceUID = metadata.SOPInstanceUID;
+  let numberOfFrames = metadata.NumberOfFrames || 1;
+  numberOfFrames = Number(numberOfFrames);
+  let frameOffsetNumber = metadata.ConcatenationFrameOffsetNumber || 0;
+  frameOffsetNumber = Number(frameOffsetNumber);
+  /*
+   * The values "TILED_SPARSE" and "TILED_FULL" were introduced in the 2018
+   * of the standard. Older datasets are equivalent to "TILED_SPARSE"
+   * even though they may not have a value or a different value.
+  */
+  const dimensionOrganizationType = metadata.DimensionOrganizationType || 'TILED_SPARSE';
+  const tilesPerRow = Math.ceil(totalPixelMatrixColumns / columns);
+  const tilesPerColumn = Math.ceil(totalPixelMatrixRows / rows);
+  const frameMapping = {};
+  if (dimensionOrganizationType === 'TILED_FULL') {
+    let offset = frameOffsetNumber + 1;
+    let limit = frameOffsetNumber + numberOfFrames;
+    for (let j = offset; j &lt;= limit; j++) {
+      let rowFraction = j / tilesPerRow;
+      let rowIndex = Math.ceil(rowFraction);
+      let colIndex = j - (rowIndex * tilesPerRow) + tilesPerRow;
+      let index = rowIndex + '-' + colIndex;
+      let frameNumber = j - offset + 1;
+      frameMapping[index] = `${sopInstanceUID}/frames/${frameNumber}`;
+    }
+  } else {
+    const functionalGroups = metadata.PerFrameFunctionalGroupsSequence;
+    for (let j = 0; j &lt; numberOfFrames; j++) {
+      let planePositions = functionalGroups[j].PlanePositionSlideSequence[0];
+      let rowPosition = planePositions.RowPositionInTotalImagePixelMatrix;
+      let columnPosition = planePositions.ColumnPositionInTotalImagePixelMatrix;
+      let rowIndex = Math.ceil(rowPosition / rows);
+      let colIndex = Math.ceil(columnPosition / columns);
+      let index = rowIndex + '-' + colIndex;
+      let frameNumber = j + 1;
+      frameMapping[index] = `${sopInstanceUID}/frames/${frameNumber}`;
+    }
+  }
+  return frameMapping;
+}
+
+
+/** Formats DICOM metadata structured according to the DICOM JSON model into a
+ * more human friendly representation, where values of data elements can be
+ * directly accessed via their keyword (e.g., "SOPInstanceUID").
+ * Bulkdata elements will be skipped.
+ *
+ * @param {Object} Metadata structured according to the DICOM JSON model
+ * @returns {Object} Formatted metadata
+ * @memberof metadata
+ */
+function formatMetadata(metadata) {
+  const loadJSONDataset = (elements) => {
+    const dataset = {};
+    Object.keys(elements).forEach(tag => {
+      const keyword = tagToKeyword[tag];
+      const vr = elements[tag]['vr'];
+      if ('BulkDataURI' in elements[tag]) {
+        console.debug(`skip bulk data element "${keyword}"`)
+      } else if ('Value' in elements[tag]) {
+        const value = elements[tag]['Value'];
+        if (vr === 'SQ') {
+          dataset[keyword] = value.map(item => loadJSONDataset(item));
+        } else {
+          // Handle value multiplicity.
+          if (value.length === 1) {
+            if (vr === 'DS' || vr === 'IS') {
+              dataset[keyword] = Number(value[0]);
+            } else {
+              dataset[keyword] = value[0];
+            }
+          } else {
+            if (vr === 'DS' || vr === 'IS') {
+              dataset[keyword] = value.map(v => Number(v));
+            } else {
+              dataset[keyword] = value;
+            }
+          }
+        }
+      } else {
+        if (vr === 'SQ') {
+          dataset[keyword] = [];
+        } else {
+          dataset[keyword] = null;
+        }
+      }
+    });
+    return dataset;
+  }
+
+  const dataset = loadJSONDataset(metadata);
+
+  // The top level (lowest resolution) image may be a single frame image in
+  // which case the "NumberOfFrames" attribute is optional. We include it for
+  // consistency.
+  if (!('NumberOfFrames' in dataset)) {
+    dataset.NumberOfFrames = 1;
+  }
+
+  return dataset;
+}
+
+
+/** DICOM VL Whole Slide Microscopy Image instance.
+ *
+ * @class
+ * @memberof metadata
+ */
+class VLWholeSlideMicroscopyImage {
+
+    /**
+     * @params {Object} options
+     * @params {Object} options.metadata - Metadata in DICOM JSON format
+     */
+    constructor(options) {
+      const sopClassUID = options.metadata['00080016']['Value'][0];
+      if (sopClassUID !== '1.2.840.10008.5.1.4.1.1.77.1.6') {
+        throw new Error(
+          'Cannot construct VL Whole Slide Microscopy Image instance ' +
+          `given dataset with SOP Class UID "${sopClassUID}"`
+        );
+      }
+
+      const dataset = formatMetadata(options.metadata);
+      Object.assign(this, dataset);
+    }
+}
+
+export { VLWholeSlideMicroscopyImage, formatMetadata, getFrameMapping };
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Namespaces</h3><ul><li><a href="api.html">api</a></li><li><a href="events.html">events</a></li><li><a href="metadata.html">metadata</a></li><li><a href="roi.html">roi</a></li><li><a href="scoord3d.html">scoord3d</a></li><li><a href="utils.html">utils</a></li><li><a href="viewer.html">viewer</a></li></ul><h3>Classes</h3><ul><li><a href="metadata.VLWholeSlideMicroscopyImage.html">VLWholeSlideMicroscopyImage</a></li><li><a href="roi.ROI.html">ROI</a></li><li><a href="scoord3d.Ellipse.html">Ellipse</a></li><li><a href="scoord3d.Ellipsoid.html">Ellipsoid</a></li><li><a href="scoord3d.Multipoint.html">Multipoint</a></li><li><a href="scoord3d.Point.html">Point</a></li><li><a href="scoord3d.Polygon.html">Polygon</a></li><li><a href="scoord3d.Polyline.html">Polyline</a></li><li><a href="viewer.LabelImageViewer.html">LabelImageViewer</a></li><li><a href="viewer.OverviewImageViewer.html">OverviewImageViewer</a></li><li><a href="viewer.VolumeImageViewer.html">VolumeImageViewer</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 3.6.5</a> on Sun Nov 29 2020 13:38:48 GMT-0500 (Eastern Standard Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

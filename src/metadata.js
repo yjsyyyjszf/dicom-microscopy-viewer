@@ -1,5 +1,11 @@
 import { keywordToTag, tagToKeyword } from './dictionary';
 
+/** Determines the mapping of pyramid tile positions to frame numbers.
+ *
+ * @param {Object} Formatted metadata of a VL Whole Slide Microscopy Image instance
+ * @returns {Object} Mapping of pyramid tile position (Row-Column) to frame URI
+ * @private
+ */
 function getFrameMapping(metadata) {
   const rows = metadata.Rows;
   const columns = metadata.Columns;
@@ -36,8 +42,8 @@ function getFrameMapping(metadata) {
       let planePositions = functionalGroups[j].PlanePositionSlideSequence[0];
       let rowPosition = planePositions.RowPositionInTotalImagePixelMatrix;
       let columnPosition = planePositions.ColumnPositionInTotalImagePixelMatrix;
-      let rowIndex = Math.ceil(rowPosition / columns);
-      let colIndex = Math.ceil(columnPosition / rows);
+      let rowIndex = Math.ceil(rowPosition / rows);
+      let colIndex = Math.ceil(columnPosition / columns);
       let index = rowIndex + '-' + colIndex;
       let frameNumber = j + 1;
       frameMapping[index] = `${sopInstanceUID}/frames/${frameNumber}`;
@@ -47,46 +53,48 @@ function getFrameMapping(metadata) {
 }
 
 
-function formatImageMetadata(metadata) {
-
-  const sopClassUID = metadata['00080016']['Value'][0];
-  if (sopClassUID !== '1.2.840.10008.5.1.4.1.1.77.1.6') {
-    throw new Error('SOP Class UID "' + sopClassUID + '" is not supported');
-  }
-
-  const imageType = metadata['00080008']['Value'];
-  if ( imageType[2] !== 'VOLUME' ) {
-    throw new Error(
-      'expected image type value 3 to be "VOLUME", is "' + imageType[2] + '" instead'
-    );
-  }
-
+/** Formats DICOM metadata structured according to the DICOM JSON model into a
+ * more human friendly representation, where values of data elements can be
+ * directly accessed via their keyword (e.g., "SOPInstanceUID").
+ * Bulkdata elements will be skipped.
+ *
+ * @param {Object} Metadata structured according to the DICOM JSON model
+ * @returns {Object} Formatted metadata
+ * @memberof metadata
+ */
+function formatMetadata(metadata) {
   const loadJSONDataset = (elements) => {
     const dataset = {};
     Object.keys(elements).forEach(tag => {
       const keyword = tagToKeyword[tag];
       const vr = elements[tag]['vr'];
       if ('BulkDataURI' in elements[tag]) {
-        console.log(`skip bulk data element "${keyword}"`)
+        console.debug(`skip bulk data element "${keyword}"`)
       } else if ('Value' in elements[tag]) {
         const value = elements[tag]['Value'];
         if (vr === 'SQ') {
-          dataset[keyword] = value.map(item => {
-            return loadJSONDataset(item);
-          });
+          dataset[keyword] = value.map(item => loadJSONDataset(item));
         } else {
           // Handle value multiplicity.
           if (value.length === 1) {
-            dataset[keyword] = value[0];
+            if (vr === 'DS' || vr === 'IS') {
+              dataset[keyword] = Number(value[0]);
+            } else {
+              dataset[keyword] = value[0];
+            }
           } else {
-            dataset[keyword] = value;
+            if (vr === 'DS' || vr === 'IS') {
+              dataset[keyword] = value.map(v => Number(v));
+            } else {
+              dataset[keyword] = value;
+            }
           }
         }
       } else {
         if (vr === 'SQ') {
           dataset[keyword] = [];
         } else {
-          dataset[keyword] = "";  // TODO: should rather be null?
+          dataset[keyword] = null;
         }
       }
     });
@@ -98,22 +106,69 @@ function formatImageMetadata(metadata) {
   // The top level (lowest resolution) image may be a single frame image in
   // which case the "NumberOfFrames" attribute is optional. We include it for
   // consistency.
-  if (!('NumberOfFrames' in dataset)) {
+  if (dataset === undefined) {
+    throw new Error('Could not format metadata: ', metadata)
+  }
+  if (!('NumberOfFrames' in dataset) && (dataset.Modality === 'SM')) {
     dataset.NumberOfFrames = 1;
   }
 
   return dataset;
 }
 
-// Combine concatenation parts
-const concatenate = (datasets) => {
 
-  // let sopInstanceUID = metadata['00080018']['Value'][0];
-  // if ('00209161' in metadata) {
-  //   sopInstanceUID = metadata['00209161']['Value'][0];
-  // }
+/** DICOM VL Whole Slide Microscopy Image instance
+ * (without Pixel Data or any other bulk data).
+ *
+ * @class
+ * @memberof metadata
+ */
+class VLWholeSlideMicroscopyImage {
 
+    /**
+     * @params {Object} options
+     * @params {Object} options.metadata - Metadata in DICOM JSON format
+     */
+    constructor(options) {
+      const dataset = formatMetadata(options.metadata);
+      if (dataset.SOPClassUID !== '1.2.840.10008.5.1.4.1.1.77.1.6') {
+        throw new Error(
+          'Cannot construct VL Whole Slide Microscopy Image instance ' +
+          `given dataset with SOP Class UID "${dataset.SOPClassUID}"`
+        );
+      }
+
+      Object.assign(this, dataset);
+    }
+}
+
+/** DICOM Comprehensive 3D SR instance.
+ *
+ * @class
+ * @memberof metadata
+ */
+class Comprehensive3DSR {
+
+    /**
+     * @params {Object} options
+     * @params {Object} options.metadata - Metadata in DICOM JSON format
+     */
+    constructor(options) {
+      const dataset = formatMetadata(options.metadata);
+      if (dataset.SOPClassUID !== '1.2.840.10008.5.1.4.1.1.88.34') {
+        throw new Error(
+          'Cannot construct Comprehensive 3D SR instance ' +
+          `given dataset with SOP Class UID "${dataset.SOPClassUID}"`
+        );
+      }
+
+      Object.assign(this, dataset);
+    }
+}
+
+export {
+  Comprehensive3DSR,
+  formatMetadata,
+  getFrameMapping,
+  VLWholeSlideMicroscopyImage,
 };
-
-
-export { formatImageMetadata, getFrameMapping };
